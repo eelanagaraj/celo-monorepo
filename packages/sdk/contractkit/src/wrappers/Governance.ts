@@ -15,6 +15,8 @@ import {
   BaseWrapper,
   bufferToSolidityBytes,
   identity,
+  MethodArgs,
+  MethodResult,
   proxyCall,
   proxySend,
   secondsToDurationString,
@@ -42,6 +44,13 @@ export interface ProposalStageDurations {
   [ProposalStage.Execution]: BigNumber // seconds
 }
 
+export interface StageSchedule {
+  [typeof ProposalStage]: {
+    start: BigNumber
+    end: BigNumber
+  }
+}
+
 export interface ParticipationParameters {
   baseline: BigNumber
   baselineFloor: BigNumber
@@ -66,7 +75,8 @@ export interface ProposalMetadata {
   descriptionURL: string
 }
 
-export type ProposalParams = Parameters<Governance['methods']['propose']>
+export type ProposalParams = MethodArgs<Governance, 'propose'>
+// export type ProposalParams = Parameters<Governance['methods']['propose']>
 export type ProposalTransaction = Pick<CeloTxPending, 'to' | 'input' | 'value'>
 export type Proposal = ProposalTransaction[]
 
@@ -108,7 +118,9 @@ export interface Votes {
   [VoteValue.Abstain]: BigNumber
 }
 
-export type HotfixParams = Parameters<Governance['methods']['executeHotfix']>
+// export type StageDurations = ReturnType<Governance['methods']['stageDurations']>.returnType
+export type StageDurations = MethodResult<Governance, 'stageDurations'>
+export type HotfixParams = MethodArgs<Governance, 'executeHotfix'>
 export const hotfixToParams = (proposal: Proposal, salt: Buffer): HotfixParams => {
   const p = proposalToParams(proposal, '') // no description URL for hotfixes
   return [p[0], p[1], p[2], p[3], bufferToHex(salt)]
@@ -173,6 +185,7 @@ export class GovernanceWrapper extends BaseWrapper<Governance> {
    */
   async stageDurations(): Promise<ProposalStageDurations> {
     const res = await this.contract.methods.stageDurations().call()
+
     return {
       [ProposalStage.Approval]: valueToBigNumber(res[0]),
       [ProposalStage.Referendum]: valueToBigNumber(res[1]),
@@ -351,24 +364,48 @@ export class GovernanceWrapper extends BaseWrapper<Governance> {
    */
   getApprover = proxyCall(this.contract.methods.approver)
 
-  getProposalStage = proxyCall(
-    this.contract.methods.getProposalStage,
-    tupleParser(valueToString),
-    (res) => Object.keys(ProposalStage)[valueToInt(res)] as ProposalStage
-  )
+  async getProposalStage(proposalID: BigNumber.Value): Promise<ProposalStage> {
+    // NOTE: `methods.getProposalStage` is broken for case where proposal is queued and expired
+    const queue = await this.getQueue()
+    const existsInQueue = queue.find((u) => u.proposalID === proposalID) !== undefined
+    if (existsInQueue) {
+      const expired = await this.isQueuedProposalExpired(proposalID)
+      return expired ? ProposalStage.Expiration : ProposalStage.Queued
+    }
 
-  async timeUntilStages(proposalID: BigNumber.Value) {
-    const meta = await this.getProposalMetadata(proposalID)
-    const now = Math.round(new Date().getTime() / 1000)
-    const durations = await this.stageDurations()
-    const referendum = meta.timestamp.plus(durations.Approval).minus(now)
-    const execution = referendum.plus(durations.Referendum)
-    const expiration = execution.plus(durations.Execution)
-    return { referendum, execution, expiration }
+    const res = await this.contract.methods.getProposalStage(valueToString(proposalID)).call()
+    return Object.keys(ProposalStage)[valueToInt(res)] as ProposalStage
   }
 
-  async humanReadableTimeUntilStages(propoaslID: BigNumber.Value) {
-    const time = await this.timeUntilStages(propoaslID)
+  async schedule(proposalID: BigNumber.Value): Promise<StageSchedule> {
+    const meta = await this.getProposalMetadata(proposalID)
+    const stage = await this.getProposalStage(proposalID)
+
+    if (stage === ProposalStage.Expiration) {
+      return {
+        [ProposalStage.Expiration]: {
+          start: meta.timestamp,
+        },
+      }
+    }
+
+    const now = Math.round(new Date().getTime() / 1000)
+    meta.timestamp
+
+    // const referendum = meta.timestamp.plus(durations.Approval).minus(now)
+    // const execution = referendum.plus(durations.Referendum)
+    // const expiration = execution.plus(durations.Execution)
+    // return { referendum, execution, expiration }
+  }
+
+  async humanReadableTimeUntilStages(proposalID: BigNumber.Value) {
+    const now = Math.round(new Date().getTime() / 1000)
+
+    // if (expired) {
+    //   return {expired: }
+    // }
+
+    const time = await this.timeUntilStages(proposalID)
     return {
       referendum: secondsToDurationString(time.referendum),
       execution: secondsToDurationString(time.execution),

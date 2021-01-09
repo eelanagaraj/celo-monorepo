@@ -535,6 +535,7 @@ contract Governance is
   /**
    * @notice Returns stage of governance process given proposal is in
    * @param proposalId The ID of the proposal to query.
+   * @dev WARNING: when proposal is queued and expired, behavior is undefined
    * @return proposal stage
    */
   function getProposalStage(uint256 proposalId) external view returns (Proposals.Stage) {
