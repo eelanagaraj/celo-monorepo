@@ -43,6 +43,7 @@ import GoogleReCaptcha from 'src/verify/safety/GoogleReCaptcha'
 import VerificationLearnMoreDialog from 'src/verify/VerificationLearnMoreDialog'
 import VerificationSkipDialog from 'src/verify/VerificationSkipDialog'
 import { currentAccountSelector } from 'src/web3/selectors'
+import { start } from './reducer'
 
 type ScreenProps = StackScreenProps<StackParamList, Screens.VerificationEducationScreen>
 
@@ -161,6 +162,11 @@ function VerificationEducationScreen({ route, navigation }: Props) {
     }
   }
 
+  // useEffect(() => {
+  // dispatch(start())
+  // }, [])
+
+  // TODO: Remove true from here
   if (feelessVerificationState.isLoading || verificationState.isLoading || !account) {
     return (
       <View style={styles.loader}>
